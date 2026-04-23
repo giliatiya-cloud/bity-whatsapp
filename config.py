@@ -20,6 +20,10 @@ LLM_PROVIDER = _require("LLM_PROVIDER")
 LLM_MODEL = _require("LLM_MODEL")
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY") if LLM_PROVIDER == "anthropic" else None
 
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
+
 DATABASE_URL = os.getenv("DATABASE_URL") or None
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/conversations.db")
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "20"))
