@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import anthropic
+
+import config
+import database
+from prompt import build_system_prompt
+from tools import TOOL_REGISTRY
+
+_client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+FRAMEWORK_INJECTED_CHAT_ID = {
+    "schedule_reminder",
+    "list_reminders",
+    "cancel_reminder",
+    "create_reminder",
+}
+
+MAX_TOOL_ITERATIONS = 5
+
+
+def _run_tool(tool_use, chat_id: str) -> str:
+    if tool_use.name not in TOOL_REGISTRY:
+        return f"כלי לא מוכר: {tool_use.name}"
+
+    tool_def = TOOL_REGISTRY[tool_use.name]
+    tool_input = dict(tool_use.input or {})
+
+    if tool_use.name in FRAMEWORK_INJECTED_CHAT_ID:
+        tool_input["chat_id"] = chat_id
+
+    try:
+        return tool_def["fn"](**tool_input)
+    except Exception as e:
+        return f"שגיאה בהפעלת הכלי: {e}"
+
+
+def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
+    history = database.tail(chat_id)
+    system_prompt = build_system_prompt(config.SPEC, TOOL_REGISTRY)
+
+    messages = history + [{"role": "user", "content": message_text}]
+    tools = [td["schema"] for td in TOOL_REGISTRY.values()]
+
+    database.append(chat_id, "user", message_text)
+
+    for iteration in range(MAX_TOOL_ITERATIONS):
+        kwargs: dict = {
+            "model": config.LLM_MODEL,
+            "max_tokens": 1024,
+            "system": system_prompt,
+            "messages": messages,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        response = _client.messages.create(**kwargs)
+
+        if response.stop_reason == "end_turn":
+            reply = _extract_text(response)
+            database.append(chat_id, "assistant", reply)
+            return reply
+
+        if response.stop_reason == "tool_use":
+            tool_uses = [b for b in response.content if b.type == "tool_use"]
+            tool_results = []
+
+            for tool_use in tool_uses:
+                result = _run_tool(tool_use, chat_id)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": str(result),
+                })
+
+            messages = messages + [
+                {"role": "assistant", "content": response.content},
+                {"role": "user", "content": tool_results},
+            ]
+            continue
+
+        break
+
+    reply = "סליחה, נתקלתי בבעיה. נסה שוב בעוד רגע."
+    database.append(chat_id, "assistant", reply)
+    return reply
+
+
+def _extract_text(response) -> str:
+    for block in response.content:
+        if hasattr(block, "text"):
+            return block.text
+    return "קיבלתי את ההודעה."

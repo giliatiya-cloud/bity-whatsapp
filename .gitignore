@@ -1,0 +1,10 @@
+.env
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+*.db
+data/
+google_client_secret.json
+smoke_test.py
+create_repo.py

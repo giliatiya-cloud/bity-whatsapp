@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "project_dir": "C:\\Users\\gili\\OneDrive\\MyProjects\\MyWaBot",
+  "bot_name": "ביטי",
+  "archetype": "personal_assistant",
+  "current_stage": "deploy",
+  "completed_stages": ["setup", "characterize", "build"],
+  "connected_tools": [],
+  "render_url": null,
+  "persistence_choice": "external_db_planned",
+  "last_touched_iso": "2026-04-23T00:00:00Z"
+}
