@@ -10,8 +10,13 @@ import config
 from tools import TOOL_REGISTRY
 from tools.whatsapp import send_reply
 
+import time
+import logging
+
 if config.DATABASE_URL:
-    _sa_url = config.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+    _base_url = config.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+    # Add connect_timeout so Supabase pooler cold-start doesn't hang indefinitely
+    _sa_url = _base_url + ("&" if "?" in _base_url else "?") + "connect_timeout=10"
 else:
     Path(config.DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
     _sa_url = f"sqlite:///{config.DATABASE_PATH}"
@@ -19,7 +24,18 @@ else:
 _scheduler = BackgroundScheduler(
     jobstores={"default": SQLAlchemyJobStore(url=_sa_url)}
 )
-_scheduler.start()
+
+# Retry scheduler start up to 3 times — Supabase pooler sometimes needs a moment
+for _attempt in range(3):
+    try:
+        _scheduler.start()
+        break
+    except Exception as _e:
+        if _attempt == 2:
+            logging.error("APScheduler failed to start after 3 attempts: %s", _e)
+            raise
+        logging.warning("APScheduler start attempt %d failed: %s — retrying in 5s", _attempt + 1, _e)
+        time.sleep(5)
 
 
 def _fire_reminder(chat_id: str, message: str) -> None:
