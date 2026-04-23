@@ -10,10 +10,15 @@ import config
 from tools import TOOL_REGISTRY
 from tools.whatsapp import send_reply
 
-Path(config.DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
-_jobstore_url = f"sqlite:///{config.DATABASE_PATH}"
+if config.DATABASE_URL:
+    from sqlalchemy.engine.url import make_url
+    _sa_url = str(make_url(config.DATABASE_URL).set(drivername="postgresql+psycopg2"))
+else:
+    Path(config.DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
+    _sa_url = f"sqlite:///{config.DATABASE_PATH}"
+
 _scheduler = BackgroundScheduler(
-    jobstores={"default": SQLAlchemyJobStore(url=_jobstore_url)}
+    jobstores={"default": SQLAlchemyJobStore(url=_sa_url)}
 )
 _scheduler.start()
 

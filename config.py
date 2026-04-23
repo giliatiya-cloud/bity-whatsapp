@@ -20,6 +20,7 @@ LLM_PROVIDER = _require("LLM_PROVIDER")
 LLM_MODEL = _require("LLM_MODEL")
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY") if LLM_PROVIDER == "anthropic" else None
 
+DATABASE_URL = os.getenv("DATABASE_URL") or None
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/conversations.db")
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "20"))
 
