@@ -11,8 +11,7 @@ from tools import TOOL_REGISTRY
 from tools.whatsapp import send_reply
 
 if config.DATABASE_URL:
-    from sqlalchemy.engine.url import make_url
-    _sa_url = str(make_url(config.DATABASE_URL).set(drivername="postgresql+psycopg2"))
+    _sa_url = config.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 else:
     Path(config.DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
     _sa_url = f"sqlite:///{config.DATABASE_PATH}"
