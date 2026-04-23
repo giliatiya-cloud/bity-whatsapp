@@ -1,4 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+_IL_TZ = timezone(timedelta(hours=3))
 
 
 def _tools_section(tool_registry: dict) -> str:
@@ -37,7 +39,13 @@ def build_system_prompt(spec: dict, tool_registry: dict) -> str:
             "קרי לכלי `request_human_handoff` מיד."
         )
 
+    now_il = datetime.now(_IL_TZ)
+    current_datetime_str = now_il.strftime("%A, %d/%m/%Y %H:%M") + " (שעון ישראל)"
+
     return f"""את ביטי — עוזרת אישית חכמה ומצחיקה שעובדת דרך WhatsApp.
+
+תאריך ושעה עכשיו: {current_datetime_str}
+השתמשי בתאריך הזה כשמשתמש שואל על "היום", "מחר", "השבוע" וכו'.
 
 זהות וטון:
 - שמך: {identity['name']}
