@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from google.oauth2.credentials import Credentials
@@ -36,15 +36,35 @@ def _fmt_event(e: dict) -> str:
     return f"{dt} — {summary}{loc_part}"
 
 
-def list_events(time_min_iso: str, time_max_iso: str) -> str:
-    """chat_id will be filled by the framework; leave empty in LLM call."""
+_IL_TZ = timezone(timedelta(hours=3))
+
+
+def _to_il_iso(date_str: str, end_of_day: bool = False) -> str:
+    """Convert YYYY-MM-DD or full ISO string to Israel-timezone ISO timestamp."""
+    if "T" in date_str and ("+" in date_str or "Z" in date_str):
+        return date_str  # already has timezone, use as-is
+    if "T" in date_str:
+        # has time but no tz — treat as Israel time
+        dt = datetime.fromisoformat(date_str).replace(tzinfo=_IL_TZ)
+    else:
+        # date only — expand to start or end of day
+        d = datetime.fromisoformat(date_str).date()
+        if end_of_day:
+            dt = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=_IL_TZ)
+        else:
+            dt = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=_IL_TZ)
+    return dt.isoformat()
+
+
+def list_events(date_from: str, date_to: str) -> str:
+    """List events between two dates. Accepts YYYY-MM-DD or full ISO 8601."""
     svc = _service()
     result = (
         svc.events()
         .list(
             calendarId="primary",
-            timeMin=time_min_iso,
-            timeMax=time_max_iso,
+            timeMin=_to_il_iso(date_from, end_of_day=False),
+            timeMax=_to_il_iso(date_to, end_of_day=True),
             singleEvents=True,
             orderBy="startTime",
             maxResults=20,
@@ -79,15 +99,15 @@ def delete_event(event_id: str) -> str:
     return f"האירוע {event_id} נמחק."
 
 
-def get_event_id_by_summary(summary_contains: str, time_min_iso: str, time_max_iso: str) -> str:
+def get_event_id_by_summary(summary_contains: str, date_from: str, date_to: str) -> str:
     """Find event IDs matching a title substring — use before deleting."""
     svc = _service()
     result = (
         svc.events()
         .list(
             calendarId="primary",
-            timeMin=time_min_iso,
-            timeMax=time_max_iso,
+            timeMin=_to_il_iso(date_from, end_of_day=False),
+            timeMax=_to_il_iso(date_to, end_of_day=True),
             q=summary_contains,
             singleEvents=True,
             orderBy="startTime",
@@ -105,20 +125,20 @@ def get_event_id_by_summary(summary_contains: str, time_min_iso: str, time_max_i
 TOOL_REGISTRY["list_calendar_events"] = {
     "schema": {
         "name": "list_calendar_events",
-        "description": "מציגה אירועים ביומן Google של המשתמש בין שני תאריכים",
+        "description": "מציגה אירועים ביומן Google של המשתמש בין שני תאריכים. קבלי תאריכים בפורמט YYYY-MM-DD.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "time_min_iso": {
+                "date_from": {
                     "type": "string",
-                    "description": "תאריך התחלה בפורמט ISO 8601 עם timezone, למשל 2026-04-23T00:00:00+03:00",
+                    "description": "תאריך התחלה בפורמט YYYY-MM-DD, למשל 2026-04-25",
                 },
-                "time_max_iso": {
+                "date_to": {
                     "type": "string",
-                    "description": "תאריך סיום בפורמט ISO 8601 עם timezone, למשל 2026-04-23T23:59:59+03:00",
+                    "description": "תאריך סיום בפורמט YYYY-MM-DD, למשל 2026-04-25 (אותו יום להצגת יום אחד)",
                 },
             },
-            "required": ["time_min_iso", "time_max_iso"],
+            "required": ["date_from", "date_to"],
         },
     },
     "fn": list_events,
@@ -172,10 +192,10 @@ TOOL_REGISTRY["find_calendar_event_id"] = {
             "type": "object",
             "properties": {
                 "summary_contains": {"type": "string", "description": "מילת חיפוש בשם האירוע"},
-                "time_min_iso": {"type": "string", "description": "תחילת טווח חיפוש ISO 8601"},
-                "time_max_iso": {"type": "string", "description": "סוף טווח חיפוש ISO 8601"},
+                "date_from": {"type": "string", "description": "תחילת טווח חיפוש YYYY-MM-DD"},
+                "date_to": {"type": "string", "description": "סוף טווח חיפוש YYYY-MM-DD"},
             },
-            "required": ["summary_contains", "time_min_iso", "time_max_iso"],
+            "required": ["summary_contains", "date_from", "date_to"],
         },
     },
     "fn": get_event_id_by_summary,
