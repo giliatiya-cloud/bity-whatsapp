@@ -13,3 +13,9 @@ try:
     from tools import google_calendar as _gcal_module  # noqa: F401
 except ImportError:
     pass
+
+# Gmail
+try:
+    from tools import gmail as _gmail_module  # noqa: F401
+except ImportError:
+    pass
