@@ -23,18 +23,17 @@ def health():
     return {"status": "ok", "bot": config.BOT_NAME, "version": 1}
 
 
-@app.get("/debug/calendar")
-def debug_calendar():
-    """Temporary: test Google Calendar API from Render environment."""
+@app.get("/debug/tools")
+def debug_tools():
+    """Temporary: check what tools are loaded and test calendar creation."""
+    from tools import TOOL_REGISTRY
     try:
-        from tools.google_calendar import _access_token, list_events, create_event
-        token = _access_token()
-        result = create_event("DEBUG-FROM-RENDER", "2026-04-26T09:00:00", "2026-04-26T10:00:00")
-        events = list_events("2026-04-26", "2026-04-26")
-        return {"ok": True, "token_prefix": token[:10] + "...", "create_result": result, "events_after": events}
+        from tools.google_calendar import create_event
+        result = create_event("DEBUG-AGENT-TEST", "2026-04-27T09:00:00", "2026-04-27T10:00:00")
+        return {"tools": list(TOOL_REGISTRY.keys()), "create_test": result}
     except Exception as e:
         import traceback
-        return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+        return {"tools": list(TOOL_REGISTRY.keys()), "error": str(e), "trace": traceback.format_exc()}
 
 
 @app.post("/webhook/green-api")
