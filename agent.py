@@ -60,6 +60,8 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
 
         response = _client.messages.create(**kwargs)
 
+        import logging as _log
+        _log.info("LLM stop_reason=%s iteration=%d", response.stop_reason, iteration)
         if response.stop_reason == "end_turn":
             reply = _extract_text(response)
             database.append(chat_id, "assistant", reply)
@@ -70,7 +72,10 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
             tool_results = []
 
             for tool_use in tool_uses:
+                import logging as _log
+                _log.info("TOOL CALL: %s(%s)", tool_use.name, tool_use.input)
                 result, is_error = _run_tool(tool_use, chat_id)
+                _log.info("TOOL RESULT (error=%s): %s", is_error, str(result)[:200])
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use.id,
