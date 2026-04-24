@@ -3,14 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
+import httpx
 from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
 
 import config
 from tools import TOOL_REGISTRY
 
+_IL_TZ = timezone(timedelta(hours=3))
+_CALENDAR_BASE = "https://www.googleapis.com/calendar/v3"
 
-def _service():
+
+def _access_token() -> str:
     creds = Credentials(
         token=None,
         refresh_token=config.GOOGLE_REFRESH_TOKEN,
@@ -18,7 +22,42 @@ def _service():
         client_secret=config.GOOGLE_CLIENT_SECRET,
         token_uri="https://oauth2.googleapis.com/token",
     )
-    return build("calendar", "v3", credentials=creds, cache_discovery=False)
+    creds.refresh(Request())
+    return creds.token
+
+
+def _get(path: str, params: dict | None = None) -> dict:
+    token = _access_token()
+    r = httpx.get(
+        f"{_CALENDAR_BASE}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        params=params or {},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _post(path: str, body: dict) -> dict:
+    token = _access_token()
+    r = httpx.post(
+        f"{_CALENDAR_BASE}{path}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=body,
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _delete(path: str) -> None:
+    token = _access_token()
+    r = httpx.delete(
+        f"{_CALENDAR_BASE}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    r.raise_for_status()
 
 
 def _fmt_event(e: dict) -> str:
@@ -36,18 +75,12 @@ def _fmt_event(e: dict) -> str:
     return f"{dt} — {summary}{loc_part}"
 
 
-_IL_TZ = timezone(timedelta(hours=3))
-
-
 def _to_il_iso(date_str: str, end_of_day: bool = False) -> str:
-    """Convert YYYY-MM-DD or full ISO string to Israel-timezone ISO timestamp."""
     if "T" in date_str and ("+" in date_str or "Z" in date_str):
-        return date_str  # already has timezone, use as-is
+        return date_str
     if "T" in date_str:
-        # has time but no tz — treat as Israel time
         dt = datetime.fromisoformat(date_str).replace(tzinfo=_IL_TZ)
     else:
-        # date only — expand to start or end of day
         d = datetime.fromisoformat(date_str).date()
         if end_of_day:
             dt = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=_IL_TZ)
@@ -57,28 +90,23 @@ def _to_il_iso(date_str: str, end_of_day: bool = False) -> str:
 
 
 def list_events(date_from: str, date_to: str) -> str:
-    """List events between two dates. Accepts YYYY-MM-DD or full ISO 8601."""
-    svc = _service()
-    result = (
-        svc.events()
-        .list(
-            calendarId="primary",
-            timeMin=_to_il_iso(date_from, end_of_day=False),
-            timeMax=_to_il_iso(date_to, end_of_day=True),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=20,
-        )
-        .execute()
-    )
-    events = result.get("items", [])
+    data = _get("/calendars/primary/events", {
+        "timeMin": _to_il_iso(date_from, end_of_day=False),
+        "timeMax": _to_il_iso(date_to, end_of_day=True),
+        "singleEvents": "true",
+        "orderBy": "startTime",
+        "maxResults": 20,
+    })
+    events = data.get("items", [])
     if not events:
         return "אין אירועים בטווח הזמן הזה."
     return "\n".join(_fmt_event(e) for e in events)
 
 
 def create_event(summary: str, start_iso: str, end_iso: str, location: str = "", description: str = "") -> str:
-    svc = _service()
+    # Normalize to Israel timezone if no tz given
+    start_iso = _to_il_iso(start_iso)
+    end_iso = _to_il_iso(end_iso)
     body: dict[str, Any] = {
         "summary": summary,
         "start": {"dateTime": start_iso, "timeZone": "Asia/Jerusalem"},
@@ -88,38 +116,29 @@ def create_event(summary: str, start_iso: str, end_iso: str, location: str = "",
         body["location"] = location
     if description:
         body["description"] = description
-    event = svc.events().insert(calendarId="primary", body=body).execute()
+    event = _post("/calendars/primary/events", body)
     link = event.get("htmlLink", "")
     return f"אירוע נוצר: {summary} ב-{start_iso[:16].replace('T', ' ')}" + (f"\n{link}" if link else "")
 
 
 def delete_event(event_id: str) -> str:
-    svc = _service()
-    svc.events().delete(calendarId="primary", eventId=event_id).execute()
+    _delete(f"/calendars/primary/events/{event_id}")
     return f"האירוע {event_id} נמחק."
 
 
 def get_event_id_by_summary(summary_contains: str, date_from: str, date_to: str) -> str:
-    """Find event IDs matching a title substring — use before deleting."""
-    svc = _service()
-    result = (
-        svc.events()
-        .list(
-            calendarId="primary",
-            timeMin=_to_il_iso(date_from, end_of_day=False),
-            timeMax=_to_il_iso(date_to, end_of_day=True),
-            q=summary_contains,
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=5,
-        )
-        .execute()
-    )
-    events = result.get("items", [])
+    data = _get("/calendars/primary/events", {
+        "timeMin": _to_il_iso(date_from, end_of_day=False),
+        "timeMax": _to_il_iso(date_to, end_of_day=True),
+        "q": summary_contains,
+        "singleEvents": "true",
+        "orderBy": "startTime",
+        "maxResults": 5,
+    })
+    events = data.get("items", [])
     if not events:
         return "לא נמצאו אירועים תואמים."
-    lines = [f"{e.get('id')} — {_fmt_event(e)}" for e in events]
-    return "\n".join(lines)
+    return "\n".join(f"{e.get('id')} — {_fmt_event(e)}" for e in events)
 
 
 TOOL_REGISTRY["list_calendar_events"] = {
@@ -129,14 +148,8 @@ TOOL_REGISTRY["list_calendar_events"] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "date_from": {
-                    "type": "string",
-                    "description": "תאריך התחלה בפורמט YYYY-MM-DD, למשל 2026-04-25",
-                },
-                "date_to": {
-                    "type": "string",
-                    "description": "תאריך סיום בפורמט YYYY-MM-DD, למשל 2026-04-25 (אותו יום להצגת יום אחד)",
-                },
+                "date_from": {"type": "string", "description": "תאריך התחלה YYYY-MM-DD, למשל 2026-04-25"},
+                "date_to": {"type": "string", "description": "תאריך סיום YYYY-MM-DD, למשל 2026-04-25"},
             },
             "required": ["date_from", "date_to"],
         },
@@ -152,16 +165,10 @@ TOOL_REGISTRY["create_calendar_event"] = {
             "type": "object",
             "properties": {
                 "summary": {"type": "string", "description": "שם האירוע"},
-                "start_iso": {
-                    "type": "string",
-                    "description": "זמן התחלה בפורמט ISO 8601 עם timezone, למשל 2026-04-24T10:00:00+03:00",
-                },
-                "end_iso": {
-                    "type": "string",
-                    "description": "זמן סיום בפורמט ISO 8601 עם timezone, למשל 2026-04-24T11:00:00+03:00",
-                },
-                "location": {"type": "string", "description": "מיקום האירוע (אופציונלי)"},
-                "description": {"type": "string", "description": "תיאור האירוע (אופציונלי)"},
+                "start_iso": {"type": "string", "description": "זמן התחלה YYYY-MM-DDTHH:MM:SS למשל 2026-04-25T18:00:00"},
+                "end_iso": {"type": "string", "description": "זמן סיום YYYY-MM-DDTHH:MM:SS למשל 2026-04-25T19:00:00"},
+                "location": {"type": "string", "description": "מיקום (אופציונלי)"},
+                "description": {"type": "string", "description": "תיאור (אופציונלי)"},
             },
             "required": ["summary", "start_iso", "end_iso"],
         },
@@ -176,7 +183,7 @@ TOOL_REGISTRY["delete_calendar_event"] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "event_id": {"type": "string", "description": "מזהה האירוע למחיקה"},
+                "event_id": {"type": "string", "description": "מזהה האירוע"},
             },
             "required": ["event_id"],
         },
@@ -192,8 +199,8 @@ TOOL_REGISTRY["find_calendar_event_id"] = {
             "type": "object",
             "properties": {
                 "summary_contains": {"type": "string", "description": "מילת חיפוש בשם האירוע"},
-                "date_from": {"type": "string", "description": "תחילת טווח חיפוש YYYY-MM-DD"},
-                "date_to": {"type": "string", "description": "סוף טווח חיפוש YYYY-MM-DD"},
+                "date_from": {"type": "string", "description": "תחילת טווח YYYY-MM-DD"},
+                "date_to": {"type": "string", "description": "סוף טווח YYYY-MM-DD"},
             },
             "required": ["summary_contains", "date_from", "date_to"],
         },

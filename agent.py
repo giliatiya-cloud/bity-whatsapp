@@ -19,9 +19,10 @@ FRAMEWORK_INJECTED_CHAT_ID = {
 MAX_TOOL_ITERATIONS = 5
 
 
-def _run_tool(tool_use, chat_id: str) -> str:
+def _run_tool(tool_use, chat_id: str) -> tuple[str, bool]:
+    """Returns (result_text, is_error)."""
     if tool_use.name not in TOOL_REGISTRY:
-        return f"כלי לא מוכר: {tool_use.name}"
+        return f"כלי לא מוכר: {tool_use.name}", True
 
     tool_def = TOOL_REGISTRY[tool_use.name]
     tool_input = dict(tool_use.input or {})
@@ -30,9 +31,12 @@ def _run_tool(tool_use, chat_id: str) -> str:
         tool_input["chat_id"] = chat_id
 
     try:
-        return tool_def["fn"](**tool_input)
+        result = tool_def["fn"](**tool_input)
+        return str(result), False
     except Exception as e:
-        return f"שגיאה בהפעלת הכלי: {e}"
+        import logging
+        logging.error("Tool %s failed: %s", tool_use.name, e, exc_info=True)
+        return f"שגיאה: {e}", True
 
 
 def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
@@ -66,11 +70,12 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
             tool_results = []
 
             for tool_use in tool_uses:
-                result = _run_tool(tool_use, chat_id)
+                result, is_error = _run_tool(tool_use, chat_id)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use.id,
                     "content": str(result),
+                    "is_error": is_error,
                 })
 
             messages = messages + [

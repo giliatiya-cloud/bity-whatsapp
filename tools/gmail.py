@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import base64
-import email as email_lib
 from email.mime.text import MIMEText
 
+import httpx
 from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
 
 import config
 from tools import TOOL_REGISTRY
 
+_GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-def _service():
+
+def _access_token() -> str:
     creds = Credentials(
         token=None,
         refresh_token=config.GOOGLE_REFRESH_TOKEN,
@@ -19,11 +21,35 @@ def _service():
         client_secret=config.GOOGLE_CLIENT_SECRET,
         token_uri="https://oauth2.googleapis.com/token",
     )
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    creds.refresh(Request())
+    return creds.token
+
+
+def _get(path: str, params: dict | None = None) -> dict:
+    token = _access_token()
+    r = httpx.get(
+        f"{_GMAIL_BASE}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        params=params or {},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _post(path: str, body: dict) -> dict:
+    token = _access_token()
+    r = httpx.post(
+        f"{_GMAIL_BASE}{path}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=body,
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 def _decode_body(payload: dict) -> str:
-    """Extract plain text body from Gmail message payload."""
     if payload.get("mimeType") == "text/plain":
         data = payload.get("body", {}).get("data", "")
         if data:
@@ -36,21 +62,17 @@ def _decode_body(payload: dict) -> str:
 
 
 def search_emails(query: str, max_results: int = 10) -> str:
-    """Search Gmail inbox. Returns subject, from, date and snippet."""
-    svc = _service()
-    result = svc.users().messages().list(
-        userId="me", q=query, maxResults=max_results
-    ).execute()
-    messages = result.get("messages", [])
+    data = _get("/messages", {"q": query, "maxResults": max_results})
+    messages = data.get("messages", [])
     if not messages:
         return "לא נמצאו מיילים תואמים לחיפוש."
 
     lines = []
     for m in messages:
-        msg = svc.users().messages().get(
-            userId="me", id=m["id"], format="metadata",
-            metadataHeaders=["Subject", "From", "Date"]
-        ).execute()
+        msg = _get(f"/messages/{m['id']}", {
+            "format": "metadata",
+            "metadataHeaders": "Subject,From,Date",
+        })
         headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
         snippet = msg.get("snippet", "")[:120]
         lines.append(
@@ -64,11 +86,7 @@ def search_emails(query: str, max_results: int = 10) -> str:
 
 
 def get_email(message_id: str) -> str:
-    """Get full body of a Gmail message by ID."""
-    svc = _service()
-    msg = svc.users().messages().get(
-        userId="me", id=message_id, format="full"
-    ).execute()
+    msg = _get(f"/messages/{message_id}", {"format": "full"})
     headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
     body = _decode_body(msg.get("payload", {}))
     return (
@@ -80,15 +98,11 @@ def get_email(message_id: str) -> str:
 
 
 def create_draft(to: str, subject: str, body: str) -> str:
-    """Create a Gmail draft (does NOT send — user must review and send manually)."""
-    svc = _service()
     mime = MIMEText(body, "plain", "utf-8")
     mime["to"] = to
     mime["subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
-    draft = svc.users().drafts().create(
-        userId="me", body={"message": {"raw": raw}}
-    ).execute()
+    draft = _post("/drafts", {"message": {"raw": raw}})
     draft_id = draft.get("id", "?")
     return f"טיוטה נוצרה (מזהה: {draft_id}). תוכל לעיין בה ב-Gmail ולשלוח ידנית."
 
@@ -96,13 +110,13 @@ def create_draft(to: str, subject: str, body: str) -> str:
 TOOL_REGISTRY["search_emails"] = {
     "schema": {
         "name": "search_emails",
-        "description": "מחפשת מיילים ב-Gmail לפי מחרוזת חיפוש (שם שולח, נושא, מילה בתוכן). מחזירה רשימת תוצאות.",
+        "description": "מחפשת מיילים ב-Gmail לפי מחרוזת חיפוש (שולח, נושא, תוכן). מחזירה רשימת תוצאות.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "מחרוזת חיפוש, כמו 'from:boss@example.com' או 'חשבונית' או 'is:unread'",
+                    "description": "מחרוזת חיפוש, למשל 'from:boss@example.com' או 'חשבונית' או 'is:unread'",
                 },
                 "max_results": {
                     "type": "integer",
@@ -122,10 +136,7 @@ TOOL_REGISTRY["get_email"] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "message_id": {
-                    "type": "string",
-                    "description": "מזהה המייל מחיפוש קודם",
-                },
+                "message_id": {"type": "string", "description": "מזהה המייל"},
             },
             "required": ["message_id"],
         },
@@ -140,18 +151,9 @@ TOOL_REGISTRY["create_email_draft"] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "to": {
-                    "type": "string",
-                    "description": "כתובת הנמען, למשל someone@example.com",
-                },
-                "subject": {
-                    "type": "string",
-                    "description": "נושא המייל",
-                },
-                "body": {
-                    "type": "string",
-                    "description": "תוכן המייל",
-                },
+                "to": {"type": "string", "description": "כתובת הנמען, למשל someone@example.com"},
+                "subject": {"type": "string", "description": "נושא המייל"},
+                "body": {"type": "string", "description": "תוכן המייל"},
             },
             "required": ["to", "subject", "body"],
         },
