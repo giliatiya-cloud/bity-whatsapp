@@ -27,10 +27,11 @@ def health():
 def debug_calendar():
     """Temporary: test Google Calendar API from Render environment."""
     try:
-        from tools.google_calendar import _access_token, list_events
+        from tools.google_calendar import _access_token, list_events, create_event
         token = _access_token()
-        events = list_events("2026-04-24", "2026-04-30")
-        return {"ok": True, "token_prefix": token[:10] + "...", "events": events}
+        result = create_event("DEBUG-FROM-RENDER", "2026-04-26T09:00:00", "2026-04-26T10:00:00")
+        events = list_events("2026-04-26", "2026-04-26")
+        return {"ok": True, "token_prefix": token[:10] + "...", "create_result": result, "events_after": events}
     except Exception as e:
         import traceback
         return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
