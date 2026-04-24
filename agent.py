@@ -18,6 +18,19 @@ FRAMEWORK_INJECTED_CHAT_ID = {
 
 MAX_TOOL_ITERATIONS = 5
 
+# Keywords that signal an action request — force tool use when detected
+_ACTION_KEYWORDS = [
+    "קבע", "תקבע", "תקבעי", "לקבוע", "הוסף", "תוסיפי", "צור", "תצורי",
+    "מחק", "תמחקי", "בטל", "תבטלי",
+    "שלח", "תשלחי", "לשלוח", "כתוב", "תכתבי", "הכן", "תכיני", "טיוטה",
+    "תזכיר", "תזמן",
+]
+
+
+def _requires_tool(message: str) -> bool:
+    msg_lower = message.lower()
+    return any(kw in msg_lower for kw in _ACTION_KEYWORDS)
+
 
 def _run_tool(tool_use, chat_id: str) -> tuple[str, bool]:
     """Returns (result_text, is_error)."""
@@ -57,6 +70,8 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
         }
         if tools:
             kwargs["tools"] = tools
+            if _requires_tool(message_text):
+                kwargs["tool_choice"] = {"type": "any"}
 
         response = _client.messages.create(**kwargs)
 
