@@ -23,6 +23,19 @@ def health():
     return {"status": "ok", "bot": config.BOT_NAME, "version": 1}
 
 
+@app.get("/debug/calendar")
+def debug_calendar():
+    """Temporary: test Google Calendar API from Render environment."""
+    try:
+        from tools.google_calendar import _access_token, list_events
+        token = _access_token()
+        events = list_events("2026-04-24", "2026-04-30")
+        return {"ok": True, "token_prefix": token[:10] + "...", "events": events}
+    except Exception as e:
+        import traceback
+        return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+
+
 @app.post("/webhook/green-api")
 async def webhook(request: Request):
     try:
