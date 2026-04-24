@@ -61,6 +61,10 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
 
     database.append(chat_id, "user", message_text)
 
+    force_tool = bool(tools) and _requires_tool(message_text)
+
+    import logging as _log
+
     for iteration in range(MAX_TOOL_ITERATIONS):
         kwargs: dict = {
             "model": config.LLM_MODEL,
@@ -70,12 +74,13 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
         }
         if tools:
             kwargs["tools"] = tools
-            if _requires_tool(message_text):
+            if force_tool and iteration == 0:
                 kwargs["tool_choice"] = {"type": "any"}
 
+        _log.info("LLM call iteration=%d force_tool=%s tool_choice=%s",
+                  iteration, force_tool, kwargs.get("tool_choice"))
         response = _client.messages.create(**kwargs)
 
-        import logging as _log
         _log.info("LLM stop_reason=%s iteration=%d", response.stop_reason, iteration)
         if response.stop_reason == "end_turn":
             reply = _extract_text(response)
