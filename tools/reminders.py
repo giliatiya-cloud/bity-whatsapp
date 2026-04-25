@@ -24,7 +24,8 @@ else:
     _sa_url = f"sqlite:///{config.DATABASE_PATH}"
 
 _scheduler = BackgroundScheduler(
-    jobstores={"default": SQLAlchemyJobStore(url=_sa_url)}
+    jobstores={"default": SQLAlchemyJobStore(url=_sa_url)},
+    job_defaults={"misfire_grace_time": 3600},  # fire missed jobs up to 1 hour late
 )
 
 # Retry scheduler start up to 3 times — Supabase pooler sometimes needs a moment
@@ -41,7 +42,10 @@ for _attempt in range(3):
 
 
 def _fire_reminder(chat_id: str, message: str) -> None:
-    send_reply(chat_id, f"⏰ תזכורת: {message}")
+    try:
+        send_reply(chat_id, f"תזכורת: {message}")
+    except Exception as e:
+        logging.error("Failed to send reminder to %s: %s", chat_id, e)
 
 
 def create_reminder(chat_id: str, remind_at_iso: str, message: str) -> str:
