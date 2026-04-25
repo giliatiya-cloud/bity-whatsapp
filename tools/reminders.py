@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+_IL_TZ = timezone(timedelta(hours=3))
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -45,6 +47,8 @@ def _fire_reminder(chat_id: str, message: str) -> None:
 def create_reminder(chat_id: str, remind_at_iso: str, message: str) -> str:
     """chat_id will be filled by the framework; leave empty in LLM call."""
     run_time = datetime.fromisoformat(remind_at_iso)
+    if run_time.tzinfo is None:
+        run_time = run_time.replace(tzinfo=_IL_TZ)
     job = _scheduler.add_job(
         _fire_reminder,
         "date",
