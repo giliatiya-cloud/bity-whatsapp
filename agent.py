@@ -77,8 +77,6 @@ def handle_message(chat_id: str, sender_phone: str, message_text: str) -> str:
             if force_tool and iteration == 0:
                 kwargs["tool_choice"] = {"type": "any"}
 
-        _log.info("LLM call iteration=%d force_tool=%s tool_choice=%s",
-                  iteration, force_tool, kwargs.get("tool_choice"))
         response = _client.messages.create(**kwargs)
 
         _log.info("LLM stop_reason=%s iteration=%d", response.stop_reason, iteration)
